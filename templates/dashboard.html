@@ -305,7 +305,8 @@
                         <th>Prop</th>
                         <th>Line</th>
                         <th>Odds</th>
-                        <th>Probability</th>
+                        <th>Implied Prob.</th>
+                        <th>Calculated Prob.</th>
                         <th>Expected Value</th>
                         <th>Game</th>
                         <th>Bookmaker</th>
@@ -396,14 +397,30 @@
                 const oddsClass = opp.odds > 0 ? 'positive' : 'negative';
                 const oddsDisplay = opp.odds > 0 ? `+${opp.odds}` : opp.odds;
 
+                const calcProb = opp.calculated_probability || prob;
+                const calcProbClass = calcProb >= 60 ? 'high' : calcProb >= 40 ? 'medium' : 'low';
+                
+                // Format line display
+                let lineDisplay = '-';
+                if (opp.line !== null && opp.line !== undefined && opp.line !== 0) {
+                    if (opp.prop === 'SPREADS') {
+                        lineDisplay = opp.line > 0 ? `+${opp.line}` : opp.line.toString();
+                    } else if (opp.prop === 'TOTALS') {
+                        lineDisplay = opp.line.toString();
+                    } else {
+                        lineDisplay = opp.line.toString();
+                    }
+                }
+                
                 row.innerHTML = `
                     <td><span class="badge ${opp.type === 'player_prop' ? 'badge-player' : 'badge-team'}">${opp.type === 'player_prop' ? 'Player' : 'Team'}</span></td>
                     <td><span class="badge badge-sport">${opp.sport.toUpperCase()}</span></td>
                     <td>${opp.player || opp.selection || 'N/A'}</td>
                     <td>${opp.prop || 'N/A'}</td>
-                    <td>${opp.line || '-'}</td>
+                    <td>${lineDisplay}</td>
                     <td class="odds ${oddsClass}">${oddsDisplay}</td>
                     <td class="probability ${probClass}">${prob.toFixed(1)}%</td>
+                    <td class="probability ${calcProbClass}">${calcProb.toFixed(1)}%</td>
                     <td><strong>${(opp.expected_value || 0).toFixed(3)}</strong></td>
                     <td>${opp.game || 'N/A'}</td>
                     <td>${opp.bookmaker || 'N/A'}</td>

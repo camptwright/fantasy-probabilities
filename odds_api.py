@@ -83,6 +83,10 @@ class TheOddsAPI(OddsAPI):
                 logger.error(f"401 Unauthorized: Invalid or missing API key for The Odds API")
                 logger.error(f"Please check your THE_ODDS_API_KEY in .env file")
                 logger.error(f"Get your free API key at: https://the-odds-api.com/")
+            elif e.response.status_code == 422:
+                # 422 usually means the market is not available for this sport
+                logger.warning(f"422 Unprocessable Entity: Market may not be available for {sport}")
+                return []
             else:
                 logger.error(f"Error fetching odds for {sport}: {e}")
             return []
