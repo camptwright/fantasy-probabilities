@@ -35,14 +35,22 @@ class TheOddsAPI(OddsAPI):
     def __init__(self, api_key: str):
         super().__init__(api_key)
         self.base_url = "https://api.the-odds-api.com/v4"
-        self.headers = {"X-API-Key": api_key}
+        # Note: The Odds API uses apiKey as a query parameter, not a header
     
     def get_sports(self) -> List[Dict]:
         """Get list of available sports"""
         try:
-            response = requests.get(f"{self.base_url}/sports", headers=self.headers)
+            params = {"apiKey": self.api_key}
+            response = requests.get(f"{self.base_url}/sports", params=params)
             response.raise_for_status()
             return response.json()
+        except requests.exceptions.HTTPError as e:
+            if e.response.status_code == 401:
+                logger.error(f"401 Unauthorized: Invalid or missing API key for The Odds API")
+                logger.error(f"Please check your THE_ODDS_API_KEY in .env file")
+            else:
+                logger.error(f"Error fetching sports: {e}")
+            return []
         except requests.RequestException as e:
             logger.error(f"Error fetching sports: {e}")
             return []
@@ -58,6 +66,7 @@ class TheOddsAPI(OddsAPI):
         
         try:
             params = {
+                "apiKey": self.api_key,
                 "sport": api_sport,
                 "markets": ",".join(markets),
                 "regions": ",".join(regions),
@@ -66,9 +75,17 @@ class TheOddsAPI(OddsAPI):
             }
             
             response = requests.get(f"{self.base_url}/sports/{api_sport}/odds", 
-                                 headers=self.headers, params=params)
+                                 params=params)
             response.raise_for_status()
             return response.json()
+        except requests.exceptions.HTTPError as e:
+            if e.response.status_code == 401:
+                logger.error(f"401 Unauthorized: Invalid or missing API key for The Odds API")
+                logger.error(f"Please check your THE_ODDS_API_KEY in .env file")
+                logger.error(f"Get your free API key at: https://the-odds-api.com/")
+            else:
+                logger.error(f"Error fetching odds for {sport}: {e}")
+            return []
         except requests.RequestException as e:
             logger.error(f"Error fetching odds for {sport}: {e}")
             return []
@@ -79,10 +96,18 @@ class TheOddsAPI(OddsAPI):
         api_sport = self._map_sport(sport)
         
         try:
+            params = {"apiKey": self.api_key}
             response = requests.get(f"{self.base_url}/sports/{api_sport}/scores", 
-                                 headers=self.headers)
+                                 params=params)
             response.raise_for_status()
             return response.json()
+        except requests.exceptions.HTTPError as e:
+            if e.response.status_code == 401:
+                logger.error(f"401 Unauthorized: Invalid or missing API key for The Odds API")
+                logger.error(f"Please check your THE_ODDS_API_KEY in .env file")
+            else:
+                logger.error(f"Error fetching games for {sport}: {e}")
+            return []
         except requests.RequestException as e:
             logger.error(f"Error fetching games for {sport}: {e}")
             return []
@@ -228,9 +253,13 @@ class OddsManager:
         """Initialize available APIs based on environment variables"""
         # The Odds API
         odds_api_key = os.getenv("THE_ODDS_API_KEY")
-        if odds_api_key:
+        if odds_api_key and odds_api_key != "your_the_odds_api_key_here" and odds_api_key.strip():
             self.apis["the_odds_api"] = TheOddsAPI(odds_api_key)
             logger.info("The Odds API initialized")
+        elif not odds_api_key or odds_api_key == "your_the_odds_api_key_here":
+            logger.warning("THE_ODDS_API_KEY not configured or using placeholder value")
+            logger.warning("Get your free API key at: https://the-odds-api.com/")
+            logger.warning("Add it to your .env file: THE_ODDS_API_KEY=your_key_here")
         
         # OddsAPI.com
         oddsapi_key = os.getenv("ODDS_API_KEY")
