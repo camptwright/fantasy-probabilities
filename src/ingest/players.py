@@ -17,6 +17,13 @@ from src.utils.normalize import normalize_stat_type
 
 SOURCE = "nflverse"
 
+# nflverse player stats carry a `season_type` column of REG/POST (verified
+# live 2026-08-22 via nflreadpy.load_player_stats([2024]) -
+# df["season_type"].unique() returns exactly {"REG", "POST"}), which is
+# coarser than games.game_type's REG/WC/DIV/CON/SB. POST maps to any of
+# the four playoff round codes.
+_POSTSEASON_GAME_TYPES = ("WC", "DIV", "CON", "SB")
+
 # nflverse player-stat columns worth storing. Anything not listed is ignored
 # rather than stored blindly; prop markets are the reason a column earns a
 # row.
@@ -118,6 +125,16 @@ async def _game_for(db: AsyncSession, record: dict[str, Any]) -> Game | None:
     the live nflverse release ingested here (verified 2026-08-20) actually
     exposes it as `team`. Both are accepted rather than guessing which this
     version emits.
+
+    Also filtered on `game_type`/postseason-vs-regular: ESPN's sync now
+    writes Game rows with its own game_type (see src/ingest/espn.py's
+    _game_type_and_week()), and resolve_game()'s team-pair + kickoff-window
+    matching is a best-effort convergence, not a guarantee - if it ever
+    misses, season+week+team alone could match more than one row (e.g. an
+    unreconciled ESPN row sharing this team/week/season). This filter is
+    what stops db.scalar() from picking one of them arbitrarily even in
+    that case, matching this function's own docstring promise that this
+    lookup is what stands between correct and arbitrary stat attribution.
     """
     season, week = record.get("season"), record.get("week")
     abbr = record.get("recent_team") or record.get("team")
@@ -132,10 +149,14 @@ async def _game_for(db: AsyncSession, record: dict[str, Any]) -> Game | None:
         # policy resolve_player() applies to unrecognised identifiers.
         return None
 
-    return await db.scalar(
-        select(Game).where(
-            Game.season == int(season),
-            Game.week == int(week),
-            or_(Game.home_team_id == team.id, Game.away_team_id == team.id),
-        )
+    query = select(Game).where(
+        Game.season == int(season),
+        Game.week == int(week),
+        or_(Game.home_team_id == team.id, Game.away_team_id == team.id),
     )
+    season_type = record.get("season_type")
+    if season_type == "REG":
+        query = query.where(Game.game_type == "REG")
+    elif season_type == "POST":
+        query = query.where(Game.game_type.in_(_POSTSEASON_GAME_TYPES))
+    return await db.scalar(query)

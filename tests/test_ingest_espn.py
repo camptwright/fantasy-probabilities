@@ -11,7 +11,7 @@ from __future__ import annotations
 import pytest
 from sqlalchemy import func, select
 
-from src.ingest.espn import _upsert_event, sync_scoreboard
+from src.ingest.espn import _game_type_and_week, _upsert_event, sync_scoreboard
 from src.ingest.identity import resolve_team
 from src.models.facts import Game
 from src.models.governance import IngestionRun
@@ -30,6 +30,91 @@ async def test_sync_records_a_run_and_creates_fixtures(db):
         select(func.count()).select_from(Game).where(Game.espn_event_id.isnot(None))
     )
     assert games > 0, "ESPN returned no events for the next seven days"
+
+
+def test_game_type_and_week_mapping():
+    """Pins ESPN's season.type/week.number -> nflverse's game_type/week
+    vocabulary, verified live 2026-08-22 against the real ESPN scoreboard
+    endpoint (season.type 1/2/3 = preseason/regular-season/post-season) and
+    against the real 2024-season playoff dates (postseason week.number
+    1=Wild Card, 2=Divisional, 3=Conference Championship, 4=Pro Bowl,
+    5=Super Bowl), cross-checked against the live DB's own
+    season/week/game_type rows.
+    """
+    # Preseason and regular season: game_type is new/normalized, week
+    # passes through unchanged - ESPN's own numbering already matches
+    # nflverse's for these phases.
+    assert _game_type_and_week(
+        {"season": {"type": 1, "year": 2025}, "week": {"number": 2}}
+    ) == ("PRE", 2)
+    assert _game_type_and_week(
+        {"season": {"type": 2, "year": 2025}, "week": {"number": 1}}
+    ) == ("REG", 1)
+
+    # Postseason, modern (17-game) era: nflverse uses weeks 19-22.
+    assert _game_type_and_week(
+        {"season": {"type": 3, "year": 2024}, "week": {"number": 1}}
+    ) == ("WC", 19)
+    assert _game_type_and_week(
+        {"season": {"type": 3, "year": 2024}, "week": {"number": 2}}
+    ) == ("DIV", 20)
+    assert _game_type_and_week(
+        {"season": {"type": 3, "year": 2024}, "week": {"number": 3}}
+    ) == ("CON", 21)
+    assert _game_type_and_week(
+        {"season": {"type": 3, "year": 2024}, "week": {"number": 5}}
+    ) == ("SB", 22)
+
+    # Postseason, legacy (16-game) era: nflverse uses weeks 18-21 - a
+    # DIFFERENT base, proving this isn't a single hardcoded offset.
+    assert _game_type_and_week(
+        {"season": {"type": 3, "year": 2019}, "week": {"number": 1}}
+    ) == ("WC", 18)
+    assert _game_type_and_week(
+        {"season": {"type": 3, "year": 2019}, "week": {"number": 5}}
+    ) == ("SB", 21)
+
+    # Pro Bowl (week 4) and any unrecognised postseason week: left
+    # deliberately unmapped rather than guessed.
+    assert _game_type_and_week(
+        {"season": {"type": 3, "year": 2024}, "week": {"number": 4}}
+    ) == (None, None)
+
+
+async def test_upsert_event_sets_game_type_and_normalizes_postseason_week(db):
+    """The Game row _upsert_event produces must carry game_type (never set
+    before this fix) and, for a postseason event, nflverse's week
+    numbering rather than ESPN's own 1-5."""
+    event = {
+        "id": "espn-postseason-week-test",
+        "date": "2025-01-11T21:30Z",
+        "season": {"year": 2024, "type": 3},
+        "week": {"number": 1},
+        "competitions": [
+            {
+                "status": {"type": {"state": "post"}},
+                "competitors": [
+                    {
+                        "homeAway": "home",
+                        "score": "27",
+                        "team": {"displayName": "Houston Texans"},
+                    },
+                    {
+                        "homeAway": "away",
+                        "score": "32",
+                        "team": {"displayName": "Los Angeles Chargers"},
+                    },
+                ],
+            }
+        ],
+    }
+    run = IngestionRun(source="espn")
+
+    result = await _upsert_event(db, event, run)
+
+    assert result is not None
+    assert result.game_type == "WC"
+    assert result.week == 19, "ESPN's postseason week 1 must normalize to nflverse's week 19"
 
 
 async def test_upsert_event_never_persists_a_partial_new_game(db):

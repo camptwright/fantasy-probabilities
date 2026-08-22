@@ -14,6 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config.settings import get_settings
+from src.ingest.games import resolve_game
 from src.ingest.identity import resolve_team
 from src.ingest.lines import record_team_line
 from src.ingest.runs import record_run
@@ -21,6 +22,33 @@ from src.models.facts import Game
 from src.models.governance import IngestionRun
 
 SOURCE = "espn"
+
+# ESPN's season.type: verified live 2026-08-22 against the real scoreboard
+# endpoint - 1/2/3 map to the "preseason"/"regular-season"/"post-season"
+# slugs the response itself carries.
+_PRESEASON = 1
+_REGULAR_SEASON = 2
+_POSTSEASON = 3
+
+# ESPN's postseason week.number: verified live 2026-08-22 by requesting the
+# real 2024-season playoff dates and reading season/week back off each
+# round (Wild Card weekend -> 1, Divisional -> 2, Conference Championship
+# -> 3, Pro Bowl -> 4, Super Bowl -> 5). nflverse has no Pro Bowl row, so
+# week 4 (or any other unrecognised number) is deliberately left unmapped
+# rather than guessed.
+_ESPN_POSTSEASON_GAME_TYPE = {1: "WC", 2: "DIV", 3: "CON", 5: "SB"}
+_ESPN_POSTSEASON_WEEK_OFFSET = {1: 0, 2: 1, 3: 2, 5: 3}
+
+# nflverse's own postseason week NUMBERS moved when the season expanded to
+# 17 regular-season games in 2021 (verified live against the real DB:
+# `SELECT DISTINCT season, week, game_type FROM games WHERE game_type IN
+# ('WC','DIV','CON','SB')` - seasons >=2021 use weeks 19-22 for
+# WC/DIV/CON/SB; seasons <2021 use weeks 18-21). The base below picks
+# whichever epoch the event's own season falls in rather than hardcoding
+# one of them.
+_POSTSEASON_WEEK_BASE_MODERN = 19
+_POSTSEASON_WEEK_BASE_LEGACY = 18
+_SEVENTEEN_GAME_SEASON_START = 2021
 
 
 async def sync_scoreboard(db: AsyncSession, days_ahead: int = 7) -> int:
@@ -77,6 +105,14 @@ async def _upsert_event(
     schedule/status/score fields this poll does legitimately know are still
     applied. Either way, a failure is recorded on `run.detail` so a
     persistently malformed event doesn't go unnoticed.
+
+    A brand-new event (no existing row for this espn_event_id) is resolved
+    through resolve_game() rather than unconditionally constructed, so a
+    Game nflverse already seeded for this exact fixture (keyed only on
+    nflverse_game_id, matched here by team pair + kickoff window) gets
+    espn_event_id backfilled onto it instead of gaining a duplicate row -
+    without which closing (nflverse) and live (ESPN) lines for the same
+    real game could never be joined.
     """
     event_id = str(event.get("id") or "")
     if not event_id:
@@ -135,8 +171,13 @@ async def _upsert_event(
         return game
 
     if is_new:
-        game = Game(espn_event_id=event_id)
-        db.add(game)
+        game = await resolve_game(
+            db,
+            home_team_id=home.id,
+            away_team_id=away.id,
+            kickoff=_kickoff_from_event(event),
+            espn_id=event_id,
+        )
 
     _apply_schedule_fields(game, event, competition)
     _apply_scores(game, home_score, away_score, home_seen, away_seen)
@@ -145,20 +186,72 @@ async def _upsert_event(
     return game
 
 
+def _kickoff_from_event(event: dict[str, Any]) -> datetime | None:
+    """ESPN's `event.date` is already UTC (unlike nflverse's Eastern-local
+    `gametime` - see src/ingest/nflverse.py's `_kickoff()`). Shared by
+    `_upsert_event`'s resolve_game() call, which needs kickoff BEFORE a
+    Game exists to run its kickoff-window match, and `_apply_schedule_fields`,
+    which needs the same value once the Game does exist - one parser for
+    both keeps them from drifting apart."""
+    date_text = event.get("date")
+    if not date_text:
+        return None
+    return datetime.fromisoformat(date_text.replace("Z", "+00:00"))
+
+
+def _game_type_and_week(event: dict[str, Any]) -> tuple[str | None, int | None]:
+    """Map ESPN's season.type + week.number to nflverse's game_type
+    vocabulary (REG/WC/DIV/CON/SB) and nflverse's week numbering.
+
+    nflverse's live DB has no "PRE" game_type at all (it doesn't carry
+    preseason games), so introducing "PRE" here for ESPN preseason events
+    is a new value, not a collision with an existing one.
+
+    Week 4 (or any other postseason week.number ESPN doesn't document as a
+    real competitive round, i.e. the Pro Bowl) is deliberately left
+    unmapped rather than guessed - and in practice its "AFC"/"NFC" team
+    names don't resolve through resolve_team() anyway.
+    """
+    season = event.get("season") or {}
+    season_type = season.get("type")
+    week_number = (event.get("week") or {}).get("number")
+
+    if season_type == _PRESEASON:
+        return "PRE", week_number
+    if season_type == _REGULAR_SEASON:
+        return "REG", week_number
+    if season_type == _POSTSEASON:
+        game_type = _ESPN_POSTSEASON_GAME_TYPE.get(week_number)
+        if game_type is None:
+            return None, None
+        season_year = season.get("year")
+        base_week = (
+            _POSTSEASON_WEEK_BASE_MODERN
+            if season_year is not None and int(season_year) >= _SEVENTEEN_GAME_SEASON_START
+            else _POSTSEASON_WEEK_BASE_LEGACY
+        )
+        return game_type, base_week + _ESPN_POSTSEASON_WEEK_OFFSET[week_number]
+    return None, week_number
+
+
 def _apply_schedule_fields(
     game: Game, event: dict[str, Any], competition: dict[str, Any]
 ) -> None:
-    """Season/week/kickoff/status - shared by the happy path and the
-    existing-game-but-this-poll-is-incomplete path so both apply the same
-    parsing rather than duplicating it."""
+    """Season/week/game_type/kickoff/status - shared by the happy path and
+    the existing-game-but-this-poll-is-incomplete path so both apply the
+    same parsing rather than duplicating it."""
     season = (event.get("season") or {}).get("year")
     game.season = int(season) if season else game.season
-    week = (event.get("week") or {}).get("number")
-    game.week = int(week) if week else game.week
 
-    date_text = event.get("date")
-    if date_text:
-        game.game_time = datetime.fromisoformat(date_text.replace("Z", "+00:00"))
+    game_type, normalized_week = _game_type_and_week(event)
+    if normalized_week is not None:
+        game.week = int(normalized_week)
+    if game_type is not None:
+        game.game_type = game_type
+
+    kickoff = _kickoff_from_event(event)
+    if kickoff is not None:
+        game.game_time = kickoff
 
     state = ((competition.get("status") or {}).get("type") or {}).get("state")
     game.status = {"pre": "scheduled", "in": "in_progress", "post": "final"}.get(
