@@ -7,9 +7,11 @@ games with results and closing lines.
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from sqlalchemy import func, select
 
-from src.ingest.nflverse import ingest_games
+from src.ingest.nflverse import _kickoff, ingest_games
 from src.models.facts import Game, TeamMarketLine
 from src.models.identity import Team
 
@@ -116,6 +118,34 @@ async def test_spread_sign_follows_the_sportsbook_convention(db):
     # A team that won by more than 14 was almost certainly favoured, and a
     # favourite's stored line is negative.
     assert home_line < 0, f"home won big but its stored line was {home_line}"
+
+
+def test_kickoff_converts_eastern_to_utc_across_the_dst_boundary():
+    """nflverse's gametime is Eastern LOCAL time, not UTC (its own data
+    dictionary: "represented in 24-hour time and the Eastern time zone,
+    regardless of what time zone the game was being played in"). A fixed
+    offset is wrong because the season spans the November DST transition.
+
+    Both cases below are pinned against nflreadpy.load_schedules()'s real
+    gameday/gametime values (verified live 2026-08-22 via
+    `nfl.load_schedules([2024, 2025])`), not against arithmetic assumed in
+    a prompt:
+
+      2025_01_DAL_PHI: gameday 2025-09-04, gametime "20:20" - the 2025
+      season opener, a real 8:20 PM ET Thursday-night kickoff. September
+      is EDT (UTC-4), so the correct UTC instant is 2025-09-05T00:20:00Z -
+      one calendar day later than the naive UTC-stamped bug produced.
+
+      2024_19_LAC_HOU: gameday 2025-01-11, gametime "16:30" - an AFC Wild
+      Card game (season=2024, week=19 is nflverse's postseason
+      convention). January is EST (UTC-5), a DIFFERENT offset from the
+      September case, proving this isn't a single hardcoded offset.
+    """
+    opener = _kickoff({"gameday": "2025-09-04", "gametime": "20:20"})
+    assert opener == datetime(2025, 9, 5, 0, 20, tzinfo=timezone.utc)
+
+    wildcard = _kickoff({"gameday": "2025-01-11", "gametime": "16:30"})
+    assert wildcard == datetime(2025, 1, 11, 21, 30, tzinfo=timezone.utc)
 
 
 async def test_totals_are_identical_on_both_sides(db):
