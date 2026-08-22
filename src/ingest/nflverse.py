@@ -19,9 +19,10 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.ingest.games import resolve_game
 from src.ingest.identity import resolve_team
 from src.ingest.runs import record_run
-from src.models.facts import Game, TeamMarketLine
+from src.models.facts import TeamMarketLine
 
 CLOSING = "closing"
 SOURCE = "nflverse"
@@ -119,22 +120,38 @@ async def ingest_games(db: AsyncSession, seasons: list[int]) -> int:
             if not nflverse_id:
                 continue
 
-            game = await db.scalar(
-                select(Game).where(Game.nflverse_game_id == nflverse_id)
+            # Teams (and kickoff) are resolved BEFORE resolve_game() for the
+            # same autoflush-ordering reason this loop has always needed:
+            # resolve_team()'s own SELECT autoflushes the session, and a
+            # still-bare pending Game (no season yet) would fail Postgres's
+            # NOT NULL constraint if that happened before season is set
+            # below. Resolving teams first means resolve_game() never has a
+            # half-built Game to trip over.
+            home = await resolve_team(db, record["home_team"])
+            away = await resolve_team(db, record["away_team"])
+            kickoff = _kickoff(record)
+
+            # resolve_game() is the single reconciliation layer for Game
+            # identity (mirroring resolve_team/resolve_player): it matches
+            # on nflverse_game_id first, then falls back to team-pair +
+            # kickoff-window matching so an ESPN-created row for this same
+            # real fixture converges onto one Game instead of a duplicate.
+            game = await resolve_game(
+                db,
+                home_team_id=home.id,
+                away_team_id=away.id,
+                kickoff=kickoff,
+                nflverse_id=nflverse_id,
             )
-            if game is None:
-                game = Game(nflverse_game_id=nflverse_id)
-                db.add(game)
 
             # Set the team-independent fields (including the NOT NULL season
-            # column) before resolving teams below. resolve_team() issues a
-            # SELECT, which triggers autoflush on this session; if the new
-            # Game row is still bare at that point, Postgres rejects the
-            # premature INSERT with a NOT NULL violation on season.
+            # column) before the flush later in this loop body - resolve_game()
+            # deliberately leaves a newly-created row unflushed for exactly
+            # this reason (see its own docstring/comment).
             game.season = int(record["season"])
             game.week = int(record["week"]) if record.get("week") is not None else None
             game.game_type = record.get("game_type")
-            game.game_time = _kickoff(record)
+            game.game_time = kickoff
             game.home_rest = record.get("home_rest")
             game.away_rest = record.get("away_rest")
             game.div_game = bool(record["div_game"]) if record.get("div_game") is not None else None
@@ -142,9 +159,6 @@ async def ingest_games(db: AsyncSession, seasons: list[int]) -> int:
             game.surface = record.get("surface")
             game.temp = _number(record.get("temp"))
             game.wind = _number(record.get("wind"))
-
-            home = await resolve_team(db, record["home_team"])
-            away = await resolve_team(db, record["away_team"])
             game.home_team_id = home.id
             game.away_team_id = away.id
 
