@@ -3,6 +3,15 @@
 # CONSTRAINT #11: there is deliberately NO nginx service here. Nginx runs on the
 # LXC host as an apt package. A containerised nginx fights the host for port 80
 # and one of them loses non-deterministically on boot.
+#
+# KNOWN GAP: the `api`, `worker`, and `beat` services below point at
+# src/api/main.py and src/scheduler/celery_app.py, both of which the
+# NFL-only clean-slate refactor (Task 1 of this branch's rebuild plan)
+# deliberately removed - a later plan restores real entry points. Until
+# then those three services will fail to start; `docker compose config
+# --quiet` passing only proves the YAML is well-formed, not that `docker
+# compose up` works yet. This is a known, intentional gap, not an
+# oversight - do not "fix" it by restoring the services here.
 
 name: fantasy-edge
 

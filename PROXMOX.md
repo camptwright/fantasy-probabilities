@@ -5,7 +5,7 @@
 | | |
 |---|---|
 | Proxmox host | `192.168.8.109` (`reekserver`), PVE 9.2.5 |
-| Container | CT 100 `fantasy-edge`, `192.168.8.140`, Ubuntu 24.04, 3 cores / 4096MB / 40GB |
+| Container | CT 100 `fantasy-edge`, `192.168.8.140`, Ubuntu 24.04, 3 cores / 2048MB / 40GB (verified live via `pct config 100`, 2026-08-22 - see `docs/capacity.md`; an earlier 4096MB figure here was stale/wrong) |
 | Access | through Proxmox — `ssh root@192.168.8.109 "pct exec 100 -- ..."` |
 | Code | `/opt/fantasy-edge` |
 | Data | `/mnt/data/fantasy-edge/{postgres,redis,models,logs}` (bind-mounted, survives container rebuilds) |
@@ -62,10 +62,18 @@ line after any schema change.
 
 ## Operational notes
 
-- **RAM budget**: compose `mem_limit`s sum against the container's 4GB (see
-  CLAUDE.md) — fine idle, trim before all services run simultaneously under
-  load. `docker compose ps` + `docker stats` are the first check if
-  something OOMs.
+- **RAM budget**: compose `mem_limit`s currently sum to ~4,480 MiB
+  (postgres 1024 + redis 384 + api 768 + worker 1536 + beat 256 + dashboard
+  512) against CT100's actual **2048 MiB** allocation (verified live via
+  `pct config 100` and `free -m`, 2026-08-22 — see `docs/capacity.md`; this
+  doc previously and incorrectly said "the container's 4GB"). `mem_limit`
+  is a per-container ceiling, not a reservation, so services don't all hit
+  their cap simultaneously in practice — but budgeted capacity is now
+  documented as over 2x the box's real RAM, not comfortably under it as
+  this note used to claim. `docker compose ps` + `docker stats` are the
+  first check if something OOMs; `docs/capacity.md`'s own `free -m`
+  readings already show CT100 actively swapping, so this is not a
+  theoretical concern.
 - **Backups**: `/usr/local/bin/fantasy-edge-backup.sh` runs at 05:00 daily
   via cron, `pg_dump`s to `/opt/backups/fantasy-edge/`, keeps 7 days. It does
   NOT back up `/mnt/data/fantasy-edge/models` — those are regenerable via
