@@ -35,6 +35,13 @@ async def record_team_line(
             TeamMarketLine.market == market,
             TeamMarketLine.side == side,
             TeamMarketLine.source == source,
+            # Closing and live are semantically different observation
+            # types - a closing value that happens to equal the most
+            # recent live value from the same source must still be written,
+            # not silently suppressed as "unchanged". Omitting this let a
+            # closing/live pair collapse into one row, breaking the ability
+            # to compute closing-line value by comparing them.
+            TeamMarketLine.line_type == line_type,
         )
         # `observed_at` is a Python-side `datetime.now()` call (see
         # src/models/base.py's `utcnow`), not a DB-generated monotonic
@@ -93,7 +100,12 @@ async def record_prop_line(
             PlayerPropLine.stat_type == stat_type,
             PlayerPropLine.source == source,
         )
-        .order_by(desc(PlayerPropLine.observed_at))
+        # Same deterministic-tiebreak requirement as record_team_line()
+        # above: `observed_at` is a Python-side `datetime.now()` call, not
+        # a DB-generated monotonic sequence, so two rows can share a
+        # timestamp. `id` as a secondary sort key makes "latest" a
+        # reproducible answer instead of an arbitrary one.
+        .order_by(desc(PlayerPropLine.observed_at), desc(PlayerPropLine.id))
         .limit(1)
     )
     if (

@@ -13,9 +13,9 @@ from datetime import datetime, timezone
 
 from sqlalchemy import func, select
 
-from src.ingest.lines import record_team_line
-from src.models.facts import Game, TeamMarketLine
-from src.models.identity import Team  # noqa: F401 - registers `teams` for the games FK
+from src.ingest.lines import record_prop_line, record_team_line
+from src.models.facts import Game, PlayerPropLine, TeamMarketLine
+from src.models.identity import Player, Team  # noqa: F401 - registers `teams` for the games FK
 
 
 async def _game(db) -> Game:
@@ -23,6 +23,13 @@ async def _game(db) -> Game:
     db.add(game)
     await db.flush()
     return game
+
+
+async def _player(db) -> Player:
+    player = Player(full_name="Test Player", position="QB")
+    db.add(player)
+    await db.flush()
+    return player
 
 
 async def _count(db, game) -> int:
@@ -124,3 +131,48 @@ async def test_tied_observed_at_resolves_deterministically(db):
     # as returned by Postgres absent an explicit tiebreak.
     assert await record_team_line(db, line=winner.line, **kwargs) is False
     assert await record_team_line(db, line=loser.line, **kwargs) is True
+
+
+async def test_prop_line_tied_observed_at_resolves_deterministically(db):
+    """Mirrors test_tied_observed_at_resolves_deterministically above, but
+    for record_prop_line(), which had the same missing-id-tiebreak bug as
+    record_team_line() before that fix, unfixed in this sibling function."""
+    player = await _player(db)
+    tied_at = datetime.now(timezone.utc)
+    common = dict(
+        player_id=player.id, game_id=None, stat_type="passing_yards",
+        over_price_american=-110, under_price_american=-110, source="underdog",
+        observed_at=tied_at,
+    )
+    row_a = PlayerPropLine(line=250.5, **common)
+    row_b = PlayerPropLine(line=249.5, **common)
+    db.add_all([row_a, row_b])
+    await db.flush()
+    assert row_a.observed_at == row_b.observed_at, "test setup requires a genuine tie"
+
+    winner = row_a if row_a.id > row_b.id else row_b
+    loser = row_b if winner is row_a else row_a
+
+    kwargs = dict(
+        player_id=player.id, game_id=None, stat_type="passing_yards",
+        over_price_american=-110, under_price_american=-110, source="underdog",
+    )
+    assert await record_prop_line(db, line=winner.line, **kwargs) is False
+    assert await record_prop_line(db, line=loser.line, **kwargs) is True
+
+
+async def test_closing_line_is_not_suppressed_by_a_matching_live_observation(db):
+    """record_team_line()'s dedup key must include line_type. A `closing`
+    observation whose value happens to equal the most recent `live`
+    observation from the same source is a semantically different, real
+    observation and must still be written - not silently treated as
+    "unchanged" merely because the number matches."""
+    game = await _game(db)
+    base = dict(
+        game_id=game.id, market="spread", side="home", line=-3.0,
+        price_american=-110, source="espn",
+    )
+    assert await record_team_line(db, line_type="live", **base) is True
+    # Same value, but a DIFFERENT line_type - must still write.
+    assert await record_team_line(db, line_type="closing", **base) is True
+    assert await _count(db, game) == 2

@@ -61,10 +61,20 @@ async def test_was_and_wsh_resolve_to_one_washington_team(db):
 
 async def test_reingest_is_idempotent(db):
     await ingest_games(db, seasons=[2025])
-    first = await db.scalar(select(func.count()).select_from(Game))
+    first_games = await db.scalar(select(func.count()).select_from(Game))
+    first_lines = await db.scalar(select(func.count()).select_from(TeamMarketLine))
+
     await ingest_games(db, seasons=[2025])
-    second = await db.scalar(select(func.count()).select_from(Game))
-    assert first == second, "re-ingesting the same season duplicated games"
+    second_games = await db.scalar(select(func.count()).select_from(Game))
+    second_lines = await db.scalar(select(func.count()).select_from(TeamMarketLine))
+
+    assert first_games == second_games, "re-ingesting the same season duplicated games"
+    # Fix 5 gave record_team_line's dedup key a line_type filter; the
+    # closing-lines write path in ingest_games() has its own separate
+    # already-exists guard (a `line_type == CLOSING` existence check), but
+    # this is what actually proves re-ingestion doesn't duplicate the
+    # TeamMarketLine rows themselves, not just the Game rows.
+    assert first_lines == second_lines, "re-ingesting the same season duplicated market lines"
 
 
 async def test_moneyline_rows_carry_no_line_value(db):
