@@ -3,16 +3,13 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
+// Only the two pages that actually exist post-rebuild. The rest of this
+// dashboard's pages (team odds, NFL predictions, games, parlays, model lab,
+// paper tracker, ...) were removed in the 2026-08-20 NFL-only clean slate
+// and never rebuilt - this list used to still reference all of them.
 const LINKS = [
-  { href: "/", label: "Today" },
-  { href: "/team-odds", label: "Team odds" },
-  { href: "/nfl-predictions", label: "NFL predictions" },
-  { href: "/player-odds", label: "Player odds" },
-  { href: "/games", label: "Games" },
-  { href: "/favorites", label: "Favorites" },
-  { href: "/parlays", label: "Parlay builder" },
-  { href: "/model-lab", label: "Model lab" },
-  { href: "/paper-tracker", label: "Paper tracker" },
+  { href: "/fantasy", label: "Fantasy" },
+  { href: "/board", label: "Board" },
 ];
 
 export function Nav() {

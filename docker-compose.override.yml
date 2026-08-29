@@ -1,29 +1,27 @@
-# Host bind-mounts for the Proxmox LXC. Keeping state on /mnt/data means the
-# nightly tar backup (scripts/proxmox_bootstrap.sh) has one directory to grab
-# and a container rebuild never touches the data.
-#
-# Create the tree before first `up`:
-#   sudo mkdir -p /mnt/data/fantasy-edge/{postgres,redis,models,logs}
+# Optional Debian-host bind mounts. Create the tree before first `up`:
+#   mkdir -p /home/reek/apps/fantasy-edge/{postgres,redis,models,logs}
+# No sudo needed - reek owns its own home directory (no /opt or /srv access
+# on reekserver-1; see the other apps' DEPLOYMENT.md for the same pattern).
 
 services:
   postgres:
     volumes:
-      - /mnt/data/fantasy-edge/postgres:/var/lib/postgresql/data
+      - /home/reek/apps/fantasy-edge/postgres:/var/lib/postgresql/data
 
   redis:
     volumes:
-      - /mnt/data/fantasy-edge/redis:/data
+      - /home/reek/apps/fantasy-edge/redis:/data
 
   api:
     volumes:
-      - /mnt/data/fantasy-edge/models:/mnt/data/fantasy-edge/models
-      - /mnt/data/fantasy-edge/logs:/app/logs
+      - /home/reek/apps/fantasy-edge/models:/mnt/data/fantasy-edge/models
+      - /home/reek/apps/fantasy-edge/logs:/app/logs
 
   worker:
     volumes:
-      - /mnt/data/fantasy-edge/models:/mnt/data/fantasy-edge/models
-      - /mnt/data/fantasy-edge/logs:/app/logs
+      - /home/reek/apps/fantasy-edge/models:/mnt/data/fantasy-edge/models
+      - /home/reek/apps/fantasy-edge/logs:/app/logs
 
   beat:
     volumes:
-      - /mnt/data/fantasy-edge/logs:/app/logs
+      - /home/reek/apps/fantasy-edge/logs:/app/logs

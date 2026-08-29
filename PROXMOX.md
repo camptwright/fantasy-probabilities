@@ -1,3 +1,8 @@
+> **Superseded 2026-08-29.** Deployment moved to reekserver-1 (plain
+> Debian host, not an LXC) — see `DEPLOYMENT.md`. Kept here only as the
+> historical record of the RAM-budget and backup-cron lessons learned on
+> CT100; none of the `pct exec`/Proxmox-specific steps below apply anymore.
+
 # Fantasy Edge — Proxmox deployment runbook
 
 ## Infrastructure

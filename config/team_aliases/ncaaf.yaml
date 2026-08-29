@@ -1,0 +1,154 @@
+# Maps ESPN's own team abbreviation to its canonical displayName + espn_id.
+# There is no nflverse equivalent for college football, so (unlike nfl.yaml,
+# which maps nflverse's abbreviations) this file's own keys ARE the ESPN
+# abbreviation - both are ESPN-sourced.
+#
+# Built live 2026-08-29 by unioning ESPN's college-football scoreboard
+# (`?groups=80`) across every Saturday of the 2025 season, then keeping only
+# teams appearing in at least 6 of the 14 sampled weeks. `groups=80` on the
+# scoreboard endpoint returns every game with at least one FBS participant,
+# not games between two FBS teams only, so a raw union include roughly 90
+# one-off FCS teams played as early-season "buy games" - real FBS teams play
+# nearly every week, so the appearance-count threshold is what actually
+# isolates the 138-team FBS set, not the groups filter alone. (The `teams`
+# endpoint itself ignores `groups` entirely - verified live, it always
+# returns the same alphabetical slice regardless of the parameter's value.)
+aliases:
+  AFA: {espn_name: "Air Force Falcons", espn_id: "2005"}
+  AKR: {espn_name: "Akron Zips", espn_id: "2006"}
+  ALA: {espn_name: "Alabama Crimson Tide", espn_id: "333"}
+  APP: {espn_name: "App State Mountaineers", espn_id: "2026"}
+  ARIZ: {espn_name: "Arizona Wildcats", espn_id: "12"}
+  ARK: {espn_name: "Arkansas Razorbacks", espn_id: "8"}
+  ARMY: {espn_name: "Army Black Knights", espn_id: "349"}
+  ARST: {espn_name: "Arkansas State Red Wolves", espn_id: "2032"}
+  ASU: {espn_name: "Arizona State Sun Devils", espn_id: "9"}
+  AUB: {espn_name: "Auburn Tigers", espn_id: "2"}
+  BALL: {espn_name: "Ball State Cardinals", espn_id: "2050"}
+  BAY: {espn_name: "Baylor Bears", espn_id: "239"}
+  BC: {espn_name: "Boston College Eagles", espn_id: "103"}
+  BGSU: {espn_name: "Bowling Green Falcons", espn_id: "189"}
+  BOIS: {espn_name: "Boise State Broncos", espn_id: "68"}
+  BUFF: {espn_name: "Buffalo Bulls", espn_id: "2084"}
+  BYU: {espn_name: "BYU Cougars", espn_id: "252"}
+  CAL: {espn_name: "California Golden Bears", espn_id: "25"}
+  CCU: {espn_name: "Coastal Carolina Chanticleers", espn_id: "324"}
+  CIN: {espn_name: "Cincinnati Bearcats", espn_id: "2132"}
+  CLEM: {espn_name: "Clemson Tigers", espn_id: "228"}
+  CLT: {espn_name: "Charlotte 49ers", espn_id: "2429"}
+  CMU: {espn_name: "Central Michigan Chippewas", espn_id: "2117"}
+  COLO: {espn_name: "Colorado Buffaloes", espn_id: "38"}
+  CONN: {espn_name: "UConn Huskies", espn_id: "41"}
+  CSU: {espn_name: "Colorado State Rams", espn_id: "36"}
+  DEL: {espn_name: "Delaware Blue Hens", espn_id: "48"}
+  DUKE: {espn_name: "Duke Blue Devils", espn_id: "150"}
+  ECU: {espn_name: "East Carolina Pirates", espn_id: "151"}
+  EMU: {espn_name: "Eastern Michigan Eagles", espn_id: "2199"}
+  FAU: {espn_name: "Florida Atlantic Owls", espn_id: "2226"}
+  FIU: {espn_name: "Florida International Panthers", espn_id: "2229"}
+  FLA: {espn_name: "Florida Gators", espn_id: "57"}
+  FRES: {espn_name: "Fresno State Bulldogs", espn_id: "278"}
+  FSU: {espn_name: "Florida State Seminoles", espn_id: "52"}
+  GASO: {espn_name: "Georgia Southern Eagles", espn_id: "290"}
+  GAST: {espn_name: "Georgia State Panthers", espn_id: "2247"}
+  GT: {espn_name: "Georgia Tech Yellow Jackets", espn_id: "59"}
+  HAW: {espn_name: "Hawai'i Rainbow Warriors", espn_id: "62"}
+  HOU: {espn_name: "Houston Cougars", espn_id: "248"}
+  ILL: {espn_name: "Illinois Fighting Illini", espn_id: "356"}
+  IOWA: {espn_name: "Iowa Hawkeyes", espn_id: "2294"}
+  ISU: {espn_name: "Iowa State Cyclones", espn_id: "66"}
+  IU: {espn_name: "Indiana Hoosiers", espn_id: "84"}
+  JMU: {espn_name: "James Madison Dukes", espn_id: "256"}
+  JVST: {espn_name: "Jacksonville State Gamecocks", espn_id: "55"}
+  KENN: {espn_name: "Kennesaw State Owls", espn_id: "338"}
+  KENT: {espn_name: "Kent State Golden Flashes", espn_id: "2309"}
+  KSU: {espn_name: "Kansas State Wildcats", espn_id: "2306"}
+  KU: {espn_name: "Kansas Jayhawks", espn_id: "2305"}
+  LIB: {espn_name: "Liberty Flames", espn_id: "2335"}
+  LOU: {espn_name: "Louisville Cardinals", espn_id: "97"}
+  LSU: {espn_name: "LSU Tigers", espn_id: "99"}
+  LT: {espn_name: "Louisiana Tech Bulldogs", espn_id: "2348"}
+  M-OH: {espn_name: "Miami (OH) RedHawks", espn_id: "193"}
+  MASS: {espn_name: "Massachusetts Minutemen", espn_id: "113"}
+  MD: {espn_name: "Maryland Terrapins", espn_id: "120"}
+  MEM: {espn_name: "Memphis Tigers", espn_id: "235"}
+  MIA: {espn_name: "Miami Hurricanes", espn_id: "2390"}
+  MICH: {espn_name: "Michigan Wolverines", espn_id: "130"}
+  MINN: {espn_name: "Minnesota Golden Gophers", espn_id: "135"}
+  MISS: {espn_name: "Ole Miss Rebels", espn_id: "145"}
+  MIZ: {espn_name: "Missouri Tigers", espn_id: "142"}
+  MOST: {espn_name: "Missouri State Bears", espn_id: "2623"}
+  MRSH: {espn_name: "Marshall Thundering Herd", espn_id: "276"}
+  MSST: {espn_name: "Mississippi State Bulldogs", espn_id: "344"}
+  MSU: {espn_name: "Michigan State Spartans", espn_id: "127"}
+  MTSU: {espn_name: "Middle Tennessee Blue Raiders", espn_id: "2393"}
+  NAVY: {espn_name: "Navy Midshipmen", espn_id: "2426"}
+  NCSU: {espn_name: "NC State Wolfpack", espn_id: "152"}
+  ND: {espn_name: "Notre Dame Fighting Irish", espn_id: "87"}
+  NDSU: {espn_name: "North Dakota State Bison", espn_id: "2449"}
+  NEB: {espn_name: "Nebraska Cornhuskers", espn_id: "158"}
+  NEV: {espn_name: "Nevada Wolf Pack", espn_id: "2440"}
+  NIU: {espn_name: "Northern Illinois Huskies", espn_id: "2459"}
+  NMSU: {espn_name: "New Mexico State Aggies", espn_id: "166"}
+  NU: {espn_name: "Northwestern Wildcats", espn_id: "77"}
+  ODU: {espn_name: "Old Dominion Monarchs", espn_id: "295"}
+  OHIO: {espn_name: "Ohio Bobcats", espn_id: "195"}
+  OKST: {espn_name: "Oklahoma State Cowboys", espn_id: "197"}
+  ORE: {espn_name: "Oregon Ducks", espn_id: "2483"}
+  ORST: {espn_name: "Oregon State Beavers", espn_id: "204"}
+  OSU: {espn_name: "Ohio State Buckeyes", espn_id: "194"}
+  OU: {espn_name: "Oklahoma Sooners", espn_id: "201"}
+  PITT: {espn_name: "Pittsburgh Panthers", espn_id: "221"}
+  PSU: {espn_name: "Penn State Nittany Lions", espn_id: "213"}
+  PUR: {espn_name: "Purdue Boilermakers", espn_id: "2509"}
+  RICE: {espn_name: "Rice Owls", espn_id: "242"}
+  RUTG: {espn_name: "Rutgers Scarlet Knights", espn_id: "164"}
+  SAC: {espn_name: "Sacramento State Hornets", espn_id: "16"}
+  SC: {espn_name: "South Carolina Gamecocks", espn_id: "2579"}
+  SDSU: {espn_name: "San Diego State Aztecs", espn_id: "21"}
+  SHSU: {espn_name: "Sam Houston Bearkats", espn_id: "2534"}
+  SJSU: {espn_name: "San José State Spartans", espn_id: "23"}
+  SMU: {espn_name: "SMU Mustangs", espn_id: "2567"}
+  STAN: {espn_name: "Stanford Cardinal", espn_id: "24"}
+  SYR: {espn_name: "Syracuse Orange", espn_id: "183"}
+  TA&M: {espn_name: "Texas A&M Aggies", espn_id: "245"}
+  TCU: {espn_name: "TCU Horned Frogs", espn_id: "2628"}
+  TEM: {espn_name: "Temple Owls", espn_id: "218"}
+  TENN: {espn_name: "Tennessee Volunteers", espn_id: "2633"}
+  TEX: {espn_name: "Texas Longhorns", espn_id: "251"}
+  TLSA: {espn_name: "Tulsa Golden Hurricane", espn_id: "202"}
+  TOL: {espn_name: "Toledo Rockets", espn_id: "2649"}
+  TROY: {espn_name: "Troy Trojans", espn_id: "2653"}
+  TTU: {espn_name: "Texas Tech Red Raiders", espn_id: "2641"}
+  TULN: {espn_name: "Tulane Green Wave", espn_id: "2655"}
+  TXST: {espn_name: "Texas State Bobcats", espn_id: "326"}
+  UAB: {espn_name: "UAB Blazers", espn_id: "5"}
+  UCF: {espn_name: "UCF Knights", espn_id: "2116"}
+  UCLA: {espn_name: "UCLA Bruins", espn_id: "26"}
+  UGA: {espn_name: "Georgia Bulldogs", espn_id: "61"}
+  UK: {espn_name: "Kentucky Wildcats", espn_id: "96"}
+  UL: {espn_name: "Louisiana Ragin' Cajuns", espn_id: "309"}
+  ULM: {espn_name: "UL Monroe Warhawks", espn_id: "2433"}
+  UNC: {espn_name: "North Carolina Tar Heels", espn_id: "153"}
+  UNLV: {espn_name: "UNLV Rebels", espn_id: "2439"}
+  UNM: {espn_name: "New Mexico Lobos", espn_id: "167"}
+  UNT: {espn_name: "North Texas Mean Green", espn_id: "249"}
+  USA: {espn_name: "South Alabama Jaguars", espn_id: "6"}
+  USC: {espn_name: "USC Trojans", espn_id: "30"}
+  USF: {espn_name: "South Florida Bulls", espn_id: "58"}
+  USM: {espn_name: "Southern Miss Golden Eagles", espn_id: "2572"}
+  USU: {espn_name: "Utah State Aggies", espn_id: "328"}
+  UTAH: {espn_name: "Utah Utes", espn_id: "254"}
+  UTEP: {espn_name: "UTEP Miners", espn_id: "2638"}
+  UTSA: {espn_name: "UTSA Roadrunners", espn_id: "2636"}
+  UVA: {espn_name: "Virginia Cavaliers", espn_id: "258"}
+  VAN: {espn_name: "Vanderbilt Commodores", espn_id: "238"}
+  VT: {espn_name: "Virginia Tech Hokies", espn_id: "259"}
+  WAKE: {espn_name: "Wake Forest Demon Deacons", espn_id: "154"}
+  WASH: {espn_name: "Washington Huskies", espn_id: "264"}
+  WIS: {espn_name: "Wisconsin Badgers", espn_id: "275"}
+  WKU: {espn_name: "Western Kentucky Hilltoppers", espn_id: "98"}
+  WMU: {espn_name: "Western Michigan Broncos", espn_id: "2711"}
+  WSU: {espn_name: "Washington State Cougars", espn_id: "265"}
+  WVU: {espn_name: "West Virginia Mountaineers", espn_id: "277"}
+  WYO: {espn_name: "Wyoming Cowboys", espn_id: "2751"}

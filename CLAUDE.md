@@ -2,11 +2,24 @@
 
 ## What this is
 
-An NFL sports betting value engine foundation.
+A sports betting value engine foundation, plus a Sleeper fantasy-league
+advice feature.
 
-**Current scope**: NFL only. Player props (Underdog Fantasy), game outcomes (ESPN).
+**Current scope**: NFL and NCAAF. Player props (Underdog Fantasy), game
+outcomes and team markets (ESPN, The Odds API), Sleeper league sync and
+advice (NFL only - Sleeper has no NCAAF fantasy product).
 
-Historical multi-sport application (Eight-sport best-bets engine + DFS fantasy optimizer) removed 2026-08-20 per `/docs/PRESERVED.md`. The rebuild focuses on establishing data ingestion and odds-math primitives for a production NFL pipeline, with five artifacts preserved encoding real production incidents and live-verified facts.
+Historical multi-sport application (Eight-sport best-bets engine + DFS fantasy optimizer) removed 2026-08-20 per `/docs/PRESERVED.md`. The rebuild focused on establishing data ingestion and odds-math primitives for a production NFL pipeline, with five artifacts preserved encoding real production incidents and live-verified facts.
+
+**NCAAF added 2026-08-29**, deliberately overriding that rebuild's own
+"NFL only, no sport column, no multi-sport branching anywhere" constraint
+(see `tests/test_schema.py`, which used to assert the opposite). `teams`,
+`players`, and `games` now carry a `sport` column; every identity/ingestion
+call site is scoped by it. This is not a return to the old eight-sport
+architecture - there is no `sports.yaml`, no per-sport config beyond a
+small settings map, and the two supported sports (`nfl`, `ncaaf`) share one
+schema and one code path parametrized by a string, not a branching
+framework.
 
 ## Stack
 
@@ -174,7 +187,7 @@ Python 3.12 · PostgreSQL 16 · Docker Compose.
 
 ```
 config/settings.py     pydantic-settings from .env
-config/team_aliases/   nfl.yaml — team identifier -> ESPN canonical name/espn_id (constraint #24)
+config/team_aliases/   nfl.yaml, ncaaf.yaml — team identifier -> ESPN canonical name/espn_id, scoped per sport (constraint #24)
 src/data/providers/    underdog_api.py (props), espn_api.py (games)
 src/utils/             odds_math.py (vig removal), normalize.py (stat type alignment)
 alembic/versions/      migrations (empty, pending Task 2)
@@ -212,7 +225,10 @@ production incidents and live-verified facts:
 
 `tests/test_preserved.py` is the tripwire protecting these.
 
-Remaining tasks: Task 2 (schema bootstrap), Task 3–8 (data ingestion pipeline, algorithms, API scaffolding).
+The production runtime scaffold is restored: Alembic bootstrap, a narrow
+health API, and fork-safe Celery/Beat wrappers for ESPN, Underdog, and the
+quota-guarded Odds API. Remaining work is the product/API surface and
+algorithms; do not reintroduce the retired multi-sport or DFS application.
 
 ## Notes for future phases
 

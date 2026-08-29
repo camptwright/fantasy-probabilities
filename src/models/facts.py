@@ -53,8 +53,15 @@ from src.models.base import Base, CreatedAt, UUIDPrimaryKey, utcnow
 
 class Game(Base, UUIDPrimaryKey, CreatedAt):
     __tablename__ = "games"
-    __table_args__ = (Index("ix_games_season_week", "season", "week"),)
+    __table_args__ = (
+        Index("ix_games_season_week", "season", "week"),
+        Index("ix_games_sport", "sport"),
+    )
 
+    # Denormalized from the two teams rather than derived via join - every
+    # prop/signal/ranking query filters by sport directly, and a team pair
+    # is always same-sport by construction (resolve_team scopes by sport).
+    sport: Mapped[str] = mapped_column(String(8), nullable=False, default="nfl")
     nflverse_game_id: Mapped[str | None] = mapped_column(String(32), unique=True)
     espn_event_id: Mapped[str | None] = mapped_column(String(32), unique=True)
 

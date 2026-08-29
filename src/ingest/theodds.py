@@ -53,18 +53,25 @@ async def clear_quota_exhausted(redis: Redis) -> None:
     await redis.delete(QUOTA_KEY)
 
 
-async def poll_team_markets(db: AsyncSession, redis: Redis) -> int:
-    """Poll h2h, spreads, and totals. Returns rows written."""
+async def poll_team_markets(db: AsyncSession, redis: Redis, sport: str = "nfl") -> int:
+    """Poll h2h, spreads, and totals for one sport. Returns rows written.
+
+    The quota guard is deliberately account-wide, not per-sport: The Odds
+    API's 500-requests/month free tier is a single budget shared across
+    every sport polled against the same key, so is_quota_exhausted() must
+    stay unscoped even though this function now takes a sport argument.
+    """
     settings = get_settings()
     if not settings.odds_api_key:
         return 0
     if await is_quota_exhausted(redis):
         return 0
 
-    async with record_run(db, SOURCE) as run:
+    sport_key = settings.odds_api_sport_keys[sport]
+    async with record_run(db, f"{SOURCE}_{sport}") as run:
         async with httpx.AsyncClient(timeout=20.0) as client:
             response = await client.get(
-                f"{settings.odds_api_base_url}/sports/americanfootball_nfl/odds",
+                f"{settings.odds_api_base_url}/sports/{sport_key}/odds",
                 params={
                     "apiKey": settings.odds_api_key,
                     "regions": "us",
@@ -94,7 +101,7 @@ async def poll_team_markets(db: AsyncSession, redis: Redis) -> int:
             events = response.json()
 
         for event in events:
-            game = await _match_game(db, event)
+            game = await _match_game(db, event, sport)
             if game is None:
                 continue
             for entry in _rows_for(event):
@@ -106,7 +113,7 @@ async def poll_team_markets(db: AsyncSession, redis: Redis) -> int:
         return run.rows_written
 
 
-async def _match_game(db: AsyncSession, event: dict[str, Any]) -> Game | None:
+async def _match_game(db: AsyncSession, event: dict[str, Any], sport: str = "nfl") -> Game | None:
     """The Odds API identifies teams by full display name, not abbreviation."""
     home_name, away_name = event.get("home_team"), event.get("away_team")
     commence = event.get("commence_time")
@@ -114,8 +121,8 @@ async def _match_game(db: AsyncSession, event: dict[str, Any]) -> Game | None:
         return None
 
     try:
-        home = await resolve_team(db, home_name)
-        away = await resolve_team(db, away_name)
+        home = await resolve_team(db, home_name, sport=sport)
+        away = await resolve_team(db, away_name, sport=sport)
     except LookupError:
         return None
     kickoff = datetime.fromisoformat(str(commence).replace("Z", "+00:00"))

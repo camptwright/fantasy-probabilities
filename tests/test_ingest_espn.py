@@ -81,6 +81,19 @@ def test_game_type_and_week_mapping():
     ) == (None, None)
 
 
+def test_game_type_and_week_ncaaf_uses_raw_week_not_nfl_postseason_rounds():
+    """NCAAF has no nflverse equivalent to align postseason week numbering
+    to (dozens of bowls plus a multi-round CFP, not four fixed rounds), so
+    its postseason must stay ESPN's own raw week.number under game_type
+    "POST" - never NFL's WC/DIV/CON/SB vocabulary."""
+    assert _game_type_and_week(
+        {"season": {"type": 2, "year": 2025}, "week": {"number": 10}}, "ncaaf"
+    ) == ("REG", 10)
+    assert _game_type_and_week(
+        {"season": {"type": 3, "year": 2025}, "week": {"number": 1}}, "ncaaf"
+    ) == ("POST", 1)
+
+
 async def test_upsert_event_sets_game_type_and_normalizes_postseason_week(db):
     """The Game row _upsert_event produces must carry game_type (never set
     before this fix) and, for a postseason event, nflverse's week
@@ -115,6 +128,36 @@ async def test_upsert_event_sets_game_type_and_normalizes_postseason_week(db):
     assert result is not None
     assert result.game_type == "WC"
     assert result.week == 19, "ESPN's postseason week 1 must normalize to nflverse's week 19"
+
+
+async def test_upsert_event_resolves_ncaaf_teams_and_tags_the_game_sport(db):
+    """A brand-new NCAAF event must resolve teams against ncaaf.yaml (not
+    nfl.yaml) and stamp sport="ncaaf" on the created Game - the override of
+    the original NFL-only data-foundation plan (see CLAUDE.md)."""
+    event = {
+        "id": "ncaaf-espn-test-1",
+        "date": "2026-09-05T23:30Z",
+        "season": {"year": 2026, "type": 2},
+        "week": {"number": 1},
+        "competitions": [
+            {
+                "status": {"type": {"state": "pre"}},
+                "competitors": [
+                    {"homeAway": "home", "score": "0", "team": {"displayName": "Ohio State Buckeyes"}},
+                    {"homeAway": "away", "score": "0", "team": {"displayName": "Alabama Crimson Tide"}},
+                ],
+            }
+        ],
+    }
+    run = IngestionRun(source="espn")
+
+    result = await _upsert_event(db, event, run, sport="ncaaf")
+
+    assert result is not None
+    assert result.sport == "ncaaf"
+
+    home = await resolve_team(db, "Ohio State Buckeyes", sport="ncaaf")
+    assert result.home_team_id == home.id
 
 
 async def test_upsert_event_never_persists_a_partial_new_game(db):

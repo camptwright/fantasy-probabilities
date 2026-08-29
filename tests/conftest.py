@@ -35,6 +35,8 @@ _TABLES = (
     "teams", "players", "player_external_ids", "games",
     "team_market_lines", "player_prop_lines", "player_game_stats",
     "model_artifacts", "model_predictions", "ingestion_runs",
+    "sleeper_leagues", "sleeper_rosters", "sleeper_league_snapshots",
+    "team_ratings",
 )
 
 

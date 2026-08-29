@@ -33,6 +33,7 @@ FAKE_KEY = "synthetic-test-key-not-a-real-secret"
 FAKE_SETTINGS = SimpleNamespace(
     odds_api_key=FAKE_KEY,
     odds_api_base_url="https://api.the-odds-api.com/v4",
+    odds_api_sport_keys={"nfl": "americanfootball_nfl", "ncaaf": "americanfootball_ncaaf"},
     odds_api_quota_floor=50,
 )
 
@@ -68,7 +69,10 @@ async def test_failed_request_never_leaks_the_api_key_into_run_detail(db, redis)
 
     run = await db.scalar(
         select(IngestionRun)
-        .where(IngestionRun.source == "theodds")
+        # poll_team_markets is called with the default sport ("nfl"), and
+        # ingestion_runs.source is now sport-scoped ("theodds_nfl") so
+        # freshness reporting can distinguish which sport's feed is stale.
+        .where(IngestionRun.source == "theodds_nfl")
         .order_by(IngestionRun.started_at.desc())
     )
     assert run is not None

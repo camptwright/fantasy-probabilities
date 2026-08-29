@@ -9,10 +9,15 @@ against 3,841 live lines, and is reused here rather than reimplemented.
 There is no teams array, so a prop's game cannot be resolved from this
 payload. game_id is left null; joining props to fixtures is a later concern
 and guessing it here would attach lines to the wrong game.
+
+Underdog's own provider already labels college-football rows "ncaaf" (its
+`sport_id` is "CFB" - see underdog_api.py's _SPORT_ID_MAP), so supporting a
+second sport here is exactly the filter change below, not new parsing.
 """
 
 from __future__ import annotations
 
+from config.settings import get_settings
 from src.data.providers.underdog_api import get_over_under_lines, raw_lines_to_props
 from src.ingest.identity import resolve_player
 from src.ingest.lines import record_prop_line
@@ -24,8 +29,9 @@ SOURCE = "underdog"
 
 async def ingest_props(db) -> tuple[int, int]:
     """Returns (rows_written, parked_count)."""
+    supported = get_settings().supported_sports
     payload = await get_over_under_lines()
-    rows = [row for row in raw_lines_to_props(payload) if row["sport"] == "nfl"]
+    rows = [row for row in raw_lines_to_props(payload) if row["sport"] in supported]
 
     written = 0
     parked = 0
@@ -42,6 +48,7 @@ async def ingest_props(db) -> tuple[int, int]:
                 source=SOURCE,
                 external_id=external_id,
                 full_name=row["player_name"],
+                sport=row["sport"],
             )
             if player is None:
                 # Unknown or ambiguous. Parked, never name-matched: two

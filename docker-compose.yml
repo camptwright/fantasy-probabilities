@@ -1,18 +1,5 @@
 # Fantasy Edge stack.
 #
-# CONSTRAINT #11: there is deliberately NO nginx service here. Nginx runs on the
-# LXC host as an apt package. A containerised nginx fights the host for port 80
-# and one of them loses non-deterministically on boot.
-#
-# KNOWN GAP: the `api`, `worker`, and `beat` services below point at
-# src/api/main.py and src/scheduler/celery_app.py, both of which the
-# NFL-only clean-slate refactor (Task 1 of this branch's rebuild plan)
-# deliberately removed - a later plan restores real entry points. Until
-# then those three services will fail to start; `docker compose config
-# --quiet` passing only proves the YAML is well-formed, not that `docker
-# compose up` works yet. This is a known, intentional gap, not an
-# oversight - do not "fix" it by restoring the services here.
-
 name: fantasy-edge
 
 networks:
@@ -30,7 +17,7 @@ x-app: &app
   restart: unless-stopped
   networks: [fantasy]
   env_file: [.env]
-  volumes: [modeldata:/mnt/data/fantasy-edge/models]
+  volumes: ["modeldata:/mnt/data/fantasy-edge/models"]
   logging: {driver: json-file, options: {max-size: "10m", max-file: "3"}}
   depends_on:
     postgres: {condition: service_healthy}
@@ -42,11 +29,10 @@ services:
     restart: unless-stopped
     networks: [fantasy]
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-fantasy}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
-      POSTGRES_DB: ${POSTGRES_DB:-fantasy_edge}
-    volumes: [pgdata:/var/lib/postgresql/data]
-    ports: ["5433:5432"]   # 5433 on the host to avoid colliding with a local pg
+      POSTGRES_USER: "${POSTGRES_USER:-fantasy}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-changeme}"
+      POSTGRES_DB: "${POSTGRES_DB:-fantasy_edge}"
+    volumes: ["pgdata:/var/lib/postgresql/data"]
     mem_limit: 1024m
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-fantasy}"]
@@ -59,7 +45,7 @@ services:
     restart: unless-stopped
     networks: [fantasy]
     command: ["redis-server", "--appendonly", "yes", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
-    volumes: [redisdata:/data]
+    volumes: ["redisdata:/data"]
     mem_limit: 384m
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
@@ -69,23 +55,47 @@ services:
   api:
     <<: *app
     command: ["uvicorn", "src.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
-    ports: ["8000:8000"]
+    expose: ["8000"]
     environment:
-      ADJUTANT_API_URL: ${ADJUTANT_API_URL:-http://192.168.8.200:8010}
-      ADJUTANT_API_TOKEN: ${ADJUTANT_API_TOKEN:-}
-      FANTASY_PARLAY_TOKEN: ${FANTASY_PARLAY_TOKEN:-}
+      ADJUTANT_API_URL: "${ADJUTANT_API_URL:-}"
+      ADJUTANT_API_TOKEN: "${ADJUTANT_API_TOKEN:-}"
+      FANTASY_PARLAY_TOKEN: "${FANTASY_PARLAY_TOKEN:-}"
+      FANTASY_API_TOKEN: "${FANTASY_API_TOKEN:?set FANTASY_API_TOKEN in .env}"
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      migrate: {condition: service_completed_successfully}
     mem_limit: 768m
+
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["alembic", "upgrade", "head"]
+    networks: [fantasy]
+    env_file: [.env]
+    depends_on:
+      postgres: {condition: service_healthy}
+    restart: "no"
 
   worker:
     <<: *app
     # Concurrency 2 on a 4-core box leaves headroom for the API and Postgres.
     command: ["celery", "-A", "src.scheduler.celery_app", "worker", "--loglevel=info", "--concurrency=2"]
     mem_limit: 1536m
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      migrate: {condition: service_completed_successfully}
 
   beat:
     <<: *app
     command: ["celery", "-A", "src.scheduler.celery_app", "beat", "--loglevel=info"]
     mem_limit: 256m
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      migrate: {condition: service_completed_successfully}
 
   dashboard:
     build:
@@ -93,8 +103,39 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     networks: [fantasy]
-    # CONSTRAINT #10: host 3000 -> container 3000, matching the nginx upstream.
-    ports: ["3000:3000"]
+    # No host port publish: reekserver-1's shared cloudflared container
+    # reaches it over this compose network by container name once connected
+    # (see DEPLOYMENT.md), same pattern as every other app on that host.
+    expose: ["3000"]
     environment:
       NODE_ENV: production
+      FANTASY_API_URL: http://api:8000
+      FANTASY_API_TOKEN: "${FANTASY_API_TOKEN:?set FANTASY_API_TOKEN in .env}"
+      CF_ACCESS_TEAM_DOMAIN: "${CF_ACCESS_TEAM_DOMAIN:-}"
+      CF_ACCESS_AUD: "${CF_ACCESS_AUD:-}"
     mem_limit: 512m
+
+  litellm:
+    image: ghcr.io/berriai/litellm:main-latest@sha256:d1fc1c122e2c1a0cec2b00540b220ff0d2682842758eb8bc64e373a1aedfec7e
+    networks: [fantasy]
+    command: ["--config", "/config/litellm.yaml", "--port", "4000"]
+    environment:
+      # reekserver-1 cannot reach the LAN Ollama backend (different subnet,
+      # no route) - this sidecar calls Anthropic directly instead, same as
+      # every other app on that host.
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:?set ANTHROPIC_API_KEY in .env}"
+      LITELLM_MASTER_KEY: "${LITELLM_API_KEY:?set LITELLM_API_KEY in .env}"
+    volumes: ["./deploy/litellm.yaml:/config/litellm.yaml:ro"]
+    read_only: true
+    tmpfs: ["/tmp:rw,noexec,nosuid,size=64m"]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    restart: unless-stopped
+    # No mem_limit: verified live 2026-08-29 that both 256m and 512m
+    # OOM-killed this image in a restart loop (`docker events` showed a
+    # continuous oom -> die -> start cycle at both values) - the
+    # ghcr.io/berriai/litellm image needs more than this app's other
+    # services do. The other reekserver-1 apps' litellm sidecars
+    # (adjutant, wellthread, homelab-dashboard) all run this same image
+    # unconstrained; matching that working pattern rather than guessing at
+    # another number.

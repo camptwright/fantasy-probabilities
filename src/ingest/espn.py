@@ -20,6 +20,7 @@ from src.ingest.lines import record_team_line
 from src.ingest.runs import record_run
 from src.models.facts import Game
 from src.models.governance import IngestionRun
+from src.services.elo import update_ratings_after_game
 
 SOURCE = "espn"
 
@@ -51,21 +52,38 @@ _POSTSEASON_WEEK_BASE_LEGACY = 18
 _SEVENTEEN_GAME_SEASON_START = 2021
 
 
-async def sync_scoreboard(db: AsyncSession, days_ahead: int = 7) -> int:
-    settings = get_settings()
-    today = datetime.now(timezone.utc).date()
-    window = f"{today:%Y%m%d}-{today + timedelta(days=days_ahead):%Y%m%d}"
+# NCAAF's `groups=80` scope the scoreboard to FBS - verified live 2026-08-29
+# against a real November Saturday (45 games, zero non-FBS opponents).
+# Without it, ESPN also returns FCS-only matchups this app doesn't model.
+_ESPN_SCOREBOARD_PARAMS = {"nfl": {}, "ncaaf": {"groups": "80"}}
 
-    async with record_run(db, SOURCE) as run:
+
+async def sync_scoreboard(
+    db: AsyncSession, sport: str = "nfl", days_ahead: int = 7, dates: str | None = None
+) -> int:
+    """`dates` overrides the default today-forward window with an explicit
+    ESPN `dates` value (a single `YYYYMMDD`, or a `YYYYMMDD-YYYYMMDD` range)
+    - used by scripts/bootstrap_ratings.py to backfill past seasons through
+    the same insert-on-change path live sync uses, rather than a second
+    parser. ESPN's own range support is undocumented and unreliable beyond
+    roughly a week, so the bootstrap script passes single dates in a loop
+    rather than one season-wide range."""
+    settings = get_settings()
+    if dates is None:
+        today = datetime.now(timezone.utc).date()
+        dates = f"{today:%Y%m%d}-{today + timedelta(days=days_ahead):%Y%m%d}"
+    params = {"dates": dates, **_ESPN_SCOREBOARD_PARAMS.get(sport, {})}
+
+    async with record_run(db, f"{SOURCE}_{sport}") as run:
         async with httpx.AsyncClient(timeout=20.0) as client:
             response = await client.get(
-                f"{settings.espn_base_url}/scoreboard", params={"dates": window}
+                f"{settings.espn_base_urls[sport]}/scoreboard", params=params
             )
             response.raise_for_status()
             payload = response.json()
 
         for event in payload.get("events", []):
-            game = await _upsert_event(db, event, run)
+            game = await _upsert_event(db, event, run, sport)
             if game is None:
                 continue
             for entry in _odds_rows(event):
@@ -82,7 +100,7 @@ async def sync_scoreboard(db: AsyncSession, days_ahead: int = 7) -> int:
 
 
 async def _upsert_event(
-    db: AsyncSession, event: dict[str, Any], run: IngestionRun
+    db: AsyncSession, event: dict[str, Any], run: IngestionRun, sport: str = "nfl"
 ) -> Game | None:
     """Create or update the Game for one ESPN event.
 
@@ -125,6 +143,11 @@ async def _upsert_event(
 
     game = await db.scalar(select(Game).where(Game.espn_event_id == event_id))
     is_new = game is None
+    # Elo must update exactly once per game, the moment it first becomes
+    # final - never on a later poll of an already-final game (see
+    # update_ratings_after_game's own docstring on this being the caller's
+    # responsibility).
+    was_final = (not is_new) and game.status == "final"
 
     home = away = None
     home_score = away_score = None
@@ -144,7 +167,16 @@ async def _upsert_event(
         team_name = (competitor.get("team") or {}).get("displayName")
         if not team_name:
             continue
-        resolved = await resolve_team(db, team_name)
+        try:
+            resolved = await resolve_team(db, team_name, sport=sport)
+        except LookupError:
+            # NCAAF's `groups=80` scope includes any game with at least one
+            # FBS participant, not FBS-vs-FBS only (verified live 2026-08-29
+            # ingesting a real slate: Bethune-Cookman, an FCS team, appeared
+            # as an opponent's buy-game). An opponent outside our alias file
+            # must be treated the same as "no team_name" below - park this
+            # side, don't crash the whole poll over one unmodeled team.
+            continue
         if is_home:
             home, home_score = resolved, competitor.get("score")
         else:
@@ -165,9 +197,11 @@ async def _upsert_event(
         # further gated on home_seen/away_seen so a side missing from this
         # poll's competitor list entirely keeps its existing DB score
         # rather than being nulled out.
-        _apply_schedule_fields(game, event, competition)
+        _apply_schedule_fields(game, event, competition, sport)
         _apply_scores(game, home_score, away_score, home_seen, away_seen)
         await db.flush()
+        if not was_final and game.status == "final":
+            await update_ratings_after_game(db, game)
         return game
 
     if is_new:
@@ -178,11 +212,14 @@ async def _upsert_event(
             kickoff=_kickoff_from_event(event),
             espn_id=event_id,
         )
+        game.sport = sport
 
-    _apply_schedule_fields(game, event, competition)
+    _apply_schedule_fields(game, event, competition, sport)
     _apply_scores(game, home_score, away_score, home_seen, away_seen)
     game.home_team_id, game.away_team_id = home.id, away.id
     await db.flush()
+    if not was_final and game.status == "final":
+        await update_ratings_after_game(db, game)
     return game
 
 
@@ -199,18 +236,24 @@ def _kickoff_from_event(event: dict[str, Any]) -> datetime | None:
     return datetime.fromisoformat(date_text.replace("Z", "+00:00"))
 
 
-def _game_type_and_week(event: dict[str, Any]) -> tuple[str | None, int | None]:
-    """Map ESPN's season.type + week.number to nflverse's game_type
-    vocabulary (REG/WC/DIV/CON/SB) and nflverse's week numbering.
+def _game_type_and_week(event: dict[str, Any], sport: str = "nfl") -> tuple[str | None, int | None]:
+    """Map ESPN's season.type + week.number to a game_type/week pair.
+
+    NFL: aligned to nflverse's own vocabulary (REG/WC/DIV/CON/SB) and week
+    numbering, per the detailed remapping below - required so nflverse's
+    historically-seeded rows and ESPN's live-synced rows for the same game
+    join on identical values.
+
+    NCAAF has no nflverse equivalent to align to (nflreadpy doesn't cover
+    college football - see docs/nfl-modeling.md), so its postseason is left
+    as ESPN's own raw week.number under game_type "POST" rather than
+    invented WC/DIV/CON/SB rounds that don't correspond to how bowl season
+    actually works (dozens of bowls plus a multi-round CFP, not four fixed
+    rounds).
 
     nflverse's live DB has no "PRE" game_type at all (it doesn't carry
     preseason games), so introducing "PRE" here for ESPN preseason events
     is a new value, not a collision with an existing one.
-
-    Week 4 (or any other postseason week.number ESPN doesn't document as a
-    real competitive round, i.e. the Pro Bowl) is deliberately left
-    unmapped rather than guessed - and in practice its "AFC"/"NFC" team
-    names don't resolve through resolve_team() anyway.
     """
     season = event.get("season") or {}
     season_type = season.get("type")
@@ -221,6 +264,13 @@ def _game_type_and_week(event: dict[str, Any]) -> tuple[str | None, int | None]:
     if season_type == _REGULAR_SEASON:
         return "REG", week_number
     if season_type == _POSTSEASON:
+        if sport != "nfl":
+            return "POST", week_number
+        # Week 4 (or any other postseason week.number ESPN doesn't document
+        # as a real competitive round, i.e. the Pro Bowl) is deliberately
+        # left unmapped rather than guessed - and in practice its
+        # "AFC"/"NFC" team names don't resolve through resolve_team()
+        # anyway.
         game_type = _ESPN_POSTSEASON_GAME_TYPE.get(week_number)
         if game_type is None:
             return None, None
@@ -235,7 +285,7 @@ def _game_type_and_week(event: dict[str, Any]) -> tuple[str | None, int | None]:
 
 
 def _apply_schedule_fields(
-    game: Game, event: dict[str, Any], competition: dict[str, Any]
+    game: Game, event: dict[str, Any], competition: dict[str, Any], sport: str = "nfl"
 ) -> None:
     """Season/week/game_type/kickoff/status - shared by the happy path and
     the existing-game-but-this-poll-is-incomplete path so both apply the
@@ -243,7 +293,7 @@ def _apply_schedule_fields(
     season = (event.get("season") or {}).get("year")
     game.season = int(season) if season else game.season
 
-    game_type, normalized_week = _game_type_and_week(event)
+    game_type, normalized_week = _game_type_and_week(event, sport)
     if normalized_week is not None:
         game.week = int(normalized_week)
     if game_type is not None:
